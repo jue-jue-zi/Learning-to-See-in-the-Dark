@@ -2,12 +2,15 @@
 # improvement upon cqf37
 from __future__ import division
 import os, time, scipy.io
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
 import tensorflow.contrib.slim as slim
 import numpy as np
 import rawpy
 from matplotlib import pyplot as plt
 import glob
+
+tf.disable_v2_behavior()
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
 input_dir = './dataset/Sony/short/JPEG/'
 gt_dir = './dataset/Sony/long/JPEG/'
@@ -18,12 +21,12 @@ result_dir = './result_Sony/JPEG/'
 train_fns = glob.glob(gt_dir + '0*.png')
 train_ids = [int(os.path.basename(train_fn)[0:5]) for train_fn in train_fns]
 
-ps = 512  # patch size for training
-save_freq = 500
+ps = 512  # patch size for training (h x w)
+sess_output_freq = 200
 
 DEBUG = 0
 if DEBUG == 1:
-    save_freq = 2
+    sess_output_freq = 2
     train_ids = train_ids[0:5]
 
 
@@ -33,7 +36,7 @@ def lrelu(x):
 
 def upsample_and_concat(x1, x2, output_channels, in_channels):
     pool_size = 2
-    deconv_filter = tf.Variable(tf.truncated_normal([pool_size, pool_size, output_channels, in_channels], stddev=0.02))
+    deconv_filter = tf.Variable(tf.random.truncated_normal([pool_size, pool_size, output_channels, in_channels], stddev=0.02))
     deconv = tf.nn.conv2d_transpose(x1, deconv_filter, tf.shape(x2), strides=[1, pool_size, pool_size, 1])
 
     deconv_output = tf.concat([deconv, x2], 3)
@@ -95,10 +98,12 @@ t_vars = tf.trainable_variables()
 lr = tf.placeholder(tf.float32)
 G_opt = tf.train.AdamOptimizer(learning_rate=lr).minimize(G_loss)
 
-saver = tf.train.Saver()
+saver = tf.train.Saver(max_to_keep=3)
 sess.run(tf.global_variables_initializer())
+lastepoch = 0
 ckpt = tf.train.get_checkpoint_state(checkpoint_dir)
-if ckpt:
+if ckpt and ckpt.model_checkpoint_path:
+    lastepoch = int(os.path.basename(ckpt.model_checkpoint_path)[11:]) + 1
     print('loaded ' + ckpt.model_checkpoint_path)
     saver.restore(sess, ckpt.model_checkpoint_path)
 
@@ -110,11 +115,6 @@ input_images['250'] = [None] * len(train_ids)
 input_images['100'] = [None] * len(train_ids)
 
 g_loss = np.zeros((5000, 1))
-
-allfolders = glob.glob(result_dir + '*0')
-lastepoch = 0
-for folder in allfolders:
-    lastepoch = np.maximum(lastepoch, int(folder[-4:]))
 
 learning_rate = 1e-4
 for epoch in range(lastepoch, 4001):
@@ -128,7 +128,7 @@ for epoch in range(lastepoch, 4001):
         # get the path from image id
         train_id = train_ids[ind]
         in_files = glob.glob(input_dir + '%05d_00*.png' % train_id)
-        in_path = in_files[np.random.random_integers(0, len(in_files) - 1)]
+        in_path = in_files[np.random.randint(0, len(in_files))]
         in_fn = os.path.basename(in_path)
 
         gt_files = glob.glob(gt_dir + '%05d_00*.png' % train_id)
@@ -178,7 +178,7 @@ for epoch in range(lastepoch, 4001):
 
         print("%d %d Loss=%.3f Time=%.3f" % (epoch, cnt, np.mean(g_loss[np.where(g_loss)]), time.time() - st))
 
-        if epoch % save_freq == 0:
+        if epoch % sess_output_freq == 0:
             if not os.path.isdir(result_dir + '%04d' % epoch):
                 os.makedirs(result_dir + '%04d' % epoch)
 
@@ -186,4 +186,4 @@ for epoch in range(lastepoch, 4001):
             scipy.misc.toimage(temp * 255, high=255, low=0, cmin=0, cmax=255).save(
                 result_dir + '%04d/%05d_00_train_%d.jpg' % (epoch, train_id, ratio))
 
-    saver.save(sess, checkpoint_dir + 'model.ckpt')
+    saver.save(sess, checkpoint_dir + 'model.ckpt', global_step=epoch)
