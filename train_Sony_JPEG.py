@@ -1,13 +1,10 @@
-# uniform content loss + adaptive threshold + per_class_input + recursive G
-# improvement upon cqf37
-from __future__ import division
-import os, time, scipy.io
+import glob
+import os
+import time
+import numpy as np
 import tensorflow.compat.v1 as tf
 import tensorflow.contrib.slim as slim
-import numpy as np
-import rawpy
 from matplotlib import pyplot as plt
-import glob
 
 tf.disable_v2_behavior()
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
@@ -107,19 +104,10 @@ if ckpt and ckpt.model_checkpoint_path:
     print('loaded ' + ckpt.model_checkpoint_path)
     saver.restore(sess, ckpt.model_checkpoint_path)
 
-# Raw data takes long time to load. Keep them in memory after loaded.
-gt_images = [None] * 6000
-input_images = {}
-input_images['300'] = [None] * len(train_ids)
-input_images['250'] = [None] * len(train_ids)
-input_images['100'] = [None] * len(train_ids)
-
 g_loss = np.zeros((5000, 1))
 
 learning_rate = 1e-4
 for epoch in range(lastepoch, 4001):
-    if os.path.isdir(result_dir + '%04d' % epoch):
-        continue
     cnt = 0
     if epoch > 2000:
         learning_rate = 1e-5
@@ -141,24 +129,15 @@ for epoch in range(lastepoch, 4001):
         st = time.time()
         cnt += 1
 
-        # if input_images[str(ratio)[0:3]][ind] is None:
-        #     input_images[str(ratio)[0:3]][ind] = np.expand_dims(
-        #         plt.imread(in_path)[:, :, :3], axis=0) * ratio
-        #
-        #     gt_images[ind] = np.expand_dims(plt.imread(gt_path)[:, :, :3], axis=0)
         input_patch = np.expand_dims(plt.imread(in_path)[:, :, :3], axis=0) * ratio
         gt_patch = np.expand_dims(plt.imread(gt_path)[:, :, :3], axis=0)
 
         # crop
-        # H = input_images[str(ratio)[0:3]][ind].shape[1]
-        # W = input_images[str(ratio)[0:3]][ind].shape[2]
         H = input_patch.shape[1]
         W = input_patch.shape[2]
 
         xx = np.random.randint(0, W - ps)
         yy = np.random.randint(0, H - ps)
-        # input_patch = input_images[str(ratio)[0:3]][ind][:, yy:yy + ps, xx:xx + ps, :]
-        # gt_patch = gt_images[ind][:, yy:yy + ps, xx:xx + ps, :]
         input_patch = input_patch[:, yy:yy + ps, xx:xx + ps, :]
         gt_patch = gt_patch[:, yy:yy + ps, xx:xx + ps, :]
 
@@ -183,7 +162,6 @@ for epoch in range(lastepoch, 4001):
                 os.makedirs(result_dir + '%04d' % epoch)
 
             temp = np.concatenate((gt_patch[0, :, :, :], output[0, :, :, :]), axis=1)
-            scipy.misc.toimage(temp * 255, high=255, low=0, cmin=0, cmax=255).save(
-                result_dir + '%04d/%05d_00_train_%d.jpg' % (epoch, train_id, ratio))
+            plt.imsave(result_dir + '%04d/%05d_00_train_%d.jpg' % (epoch, train_id, ratio), temp)
 
     saver.save(sess, checkpoint_dir + 'model.ckpt', global_step=epoch)
