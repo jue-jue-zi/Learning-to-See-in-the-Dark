@@ -8,6 +8,7 @@ from matplotlib import pyplot as plt
 
 tf.disable_v2_behavior()
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 input_dir = './dataset/Sony/short/JPEG/'
 gt_dir = './dataset/Sony/long/JPEG/'
