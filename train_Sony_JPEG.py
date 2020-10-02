@@ -96,7 +96,7 @@ lr = tf.placeholder(tf.float32)
 G_opt = tf.train.AdamOptimizer(learning_rate=lr).minimize(G_loss)
 
 saver = tf.train.Saver(max_to_keep=3)
-# sess.run(tf.global_variables_initializer())
+sess.run(tf.global_variables_initializer())
 lastepoch = 0
 ckpt = tf.train.get_checkpoint_state(checkpoint_dir)
 if ckpt and ckpt.model_checkpoint_path:
@@ -109,67 +109,59 @@ g_loss = np.zeros((5000, 1))
 learning_rate = 1e-4
 for epoch in range(lastepoch, 4001):
     cnt = 0
-    idx = 0
     if epoch > 2000:
         learning_rate = 1e-5
 
-    batch_size = 16
-    k = np.random.permutation(len(train_ids))
-    for inds in [k[i:i+batch_size] for i in range(0, len(train_ids), batch_size)]:
+    for ind in np.random.permutation(len(train_ids)):
+        # get the path from image id
+        train_id = train_ids[ind]
+        in_files = glob.glob(input_dir + '%05d_00*.png' % train_id)
+        in_path = in_files[np.random.randint(0, len(in_files))]
+        in_fn = os.path.basename(in_path)
+
+        gt_files = glob.glob(gt_dir + '%05d_00*.png' % train_id)
+        gt_path = gt_files[0]
+        gt_fn = os.path.basename(gt_path)
+        in_exposure = float(in_fn[9:-5])
+        gt_exposure = float(gt_fn[9:-5])
+        ratio = min(gt_exposure / in_exposure, 300)
+
         st = time.time()
-        input_patch = [None] * batch_size
-        gt_patch = [None] * batch_size
-        for ind in inds:
-            # get the path from image id
-            train_id = train_ids[ind]
-            in_files = glob.glob(input_dir + '%05d_00*.png' % train_id)
-            in_path = in_files[np.random.randint(0, len(in_files))]
-            in_fn = os.path.basename(in_path)
-            gt_files = glob.glob(gt_dir + '%05d_00*.png' % train_id)
-            gt_path = gt_files[0]
-            gt_fn = os.path.basename(gt_path)
-            ratio = min(float(gt_fn[9:-5]) / float(in_fn[9:-5]), 300)
+        cnt += 1
 
-            input_patch[cnt] = plt.imread(in_path)[:, :, :3] * ratio
-            gt_patch[cnt] = plt.imread(gt_path)[:, :, :3]
+        input_patch = np.expand_dims(plt.imread(in_path)[:, :, :3], axis=0) * ratio
+        gt_patch = np.expand_dims(plt.imread(gt_path)[:, :, :3], axis=0)
 
-            # crop
-            H = input_patch[cnt].shape[0]
-            W = input_patch[cnt].shape[1]
+        # crop
+        H = input_patch.shape[1]
+        W = input_patch.shape[2]
 
-            xx = np.random.randint(0, W - ps)
-            yy = np.random.randint(0, H - ps)
-            input_patch[cnt] = input_patch[cnt][yy:yy + ps, xx:xx + ps, :]
-            gt_patch[cnt] = gt_patch[cnt][yy:yy + ps, xx:xx + ps, :]
+        xx = np.random.randint(0, W - ps)
+        yy = np.random.randint(0, H - ps)
+        input_patch = input_patch[:, yy:yy + ps, xx:xx + ps, :]
+        gt_patch = gt_patch[:, yy:yy + ps, xx:xx + ps, :]
 
-            if np.random.randint(2, size=1)[0] == 1:  # random flip
-                input_patch[cnt] = np.flip(input_patch[cnt], axis=0)
-                gt_patch[cnt] = np.flip(gt_patch[cnt], axis=0)
-            if np.random.randint(2, size=1)[0] == 1:
-                input_patch[cnt] = np.flip(input_patch[cnt], axis=1)
-                gt_patch[cnt] = np.flip(gt_patch[cnt], axis=1)
+        if np.random.randint(2, size=1)[0] == 1:  # random flip
+            input_patch = np.flip(input_patch, axis=1)
+            gt_patch = np.flip(gt_patch, axis=1)
+        if np.random.randint(2, size=1)[0] == 1:
+            input_patch = np.flip(input_patch, axis=2)
+            gt_patch = np.flip(gt_patch, axis=2)
 
-            input_patch[cnt] = np.minimum(input_patch[cnt], 1.0)
+        input_patch = np.minimum(input_patch, 1.0)
 
-            cnt += 1
-            idx += 1
-
-        input_patch = np.array(input_patch)
-        gt_patch = np.array(gt_patch)
         _, G_current, output = sess.run([G_opt, G_loss, out_image],
                                         feed_dict={in_image: input_patch, gt_image: gt_patch, lr: learning_rate})
         output = np.minimum(np.maximum(output, 0), 1)
         g_loss[ind] = G_current
 
-        print("%d %d Loss=%.3f Time=%.3f" % (epoch, idx, np.mean(g_loss[np.where(g_loss)]), time.time() - st))
+        print("%d %d Loss=%.3f Time=%.3f" % (epoch, cnt, np.mean(g_loss[np.where(g_loss)]), time.time() - st))
 
-        cnt = 0
+        if epoch % sess_output_freq == 0:
+            if not os.path.isdir(result_dir + '%04d' % epoch):
+                os.makedirs(result_dir + '%04d' % epoch)
 
-        # if epoch % sess_output_freq == 0:
-        #     if not os.path.isdir(result_dir + '%04d' % epoch):
-        #         os.makedirs(result_dir + '%04d' % epoch)
-        #
-        #     temp = np.concatenate((gt_patch[0, :, :, :], output[0, :, :, :]), axis=1)
-        #     plt.imsave(result_dir + '%04d/%05d_00_train_%d.jpg' % (epoch, train_id, ratio), temp)
+            temp = np.concatenate((gt_patch[0, :, :, :], output[0, :, :, :]), axis=1)
+            plt.imsave(result_dir + '%04d/%05d_00_train_%d.jpg' % (epoch, train_id, ratio), temp)
 
     saver.save(sess, checkpoint_dir + 'model.ckpt', global_step=epoch)
